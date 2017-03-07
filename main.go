@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	_ "image/jpeg" // Register JPEG format
 	"image/png"
 	// Register PNG  format
 	"log"
 	"os"
+	"sync"
 )
+
+// func timeTrack(start time.Time, name string) {
+// 	elapsed := time.Since(start)
+// 	log.Printf("%s took %s", name, elapsed)
+// }
 
 type imageChannelType int
 
@@ -38,7 +43,7 @@ func (imageChan *imageChannel) init(size uint) ([]uint8, []uint8, []uint) {
 	return imageChan.raw, imageChan.output, imageChan.rawIndex
 }
 
-func (imageChan *imageChannel) addValue(index int, newVal uint8) {
+func (imageChan *imageChannel) getPixelValue(index int, newVal uint8) {
 	imageChan.raw[index] = newVal
 }
 
@@ -69,7 +74,7 @@ func makeRange(min, max uint) []uint {
 	return a
 }
 
-func (imageChan *imageChannel) calculateSMQT(inputPositions []uint, quantizationLevel uint) {
+func (imageChan *imageChannel) runSMQT(inputPositions []uint, quantizationLevel uint) {
 	if quantizationLevel == 0 {
 		return
 	}
@@ -77,8 +82,8 @@ func (imageChan *imageChannel) calculateSMQT(inputPositions []uint, quantization
 	var pos uint
 	var inputVector []uint8
 
-	for i := range imageChan.rawIndex {
-		inputVector = append(inputVector, imageChan.raw[i])
+	for _, v := range inputPositions {
+		inputVector = append(inputVector, imageChan.raw[v])
 	}
 
 	mean := calculateMean(inputVector)
@@ -94,12 +99,12 @@ func (imageChan *imageChannel) calculateSMQT(inputPositions []uint, quantization
 			imageChan.output[pos] = addBit(imageChan.output[pos], true)
 		}
 	}
-	imageChan.calculateSMQT(highpos, quantizationLevel-1)
-	imageChan.calculateSMQT(lowpos, quantizationLevel-1)
-	// fmt.Println(lowpos, "Finished Low")
+	imageChan.runSMQT(highpos, quantizationLevel-1)
+	imageChan.runSMQT(lowpos, quantizationLevel-1)
 }
 
 func main() {
+	// defer timeTrack(time.Now(), "whole program")
 	var redChannel, greenChannel, blueChannel imageChannel
 
 	if len(os.Args) != 3 {
@@ -119,12 +124,13 @@ func main() {
 	size := img.Bounds().Size()
 	w := size.X
 	h := size.Y
-	fmt.Println("Initializing arrays..")
+
+	fmt.Println("Initializing image channels..")
 	redChannel.init(uint(w * h))
 	greenChannel.init(uint(w * h))
 	blueChannel.init(uint(w * h))
 
-	fmt.Println("Saving RGB values..")
+	fmt.Println("Grabbing RGB values..")
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			r, g, b, _ := img.At(x, y).RGBA()
@@ -132,21 +138,36 @@ func main() {
 			g = g / 0x101
 			b = b / 0x101
 			index := (x * h) + y // need to fix this for non (0,0) bounds
-			redChannel.addValue(index, uint8(r))
-			greenChannel.addValue(index, uint8(g))
-			blueChannel.addValue(index, uint8(b))
+			redChannel.getPixelValue(index, uint8(r))
+			greenChannel.getPixelValue(index, uint8(g))
+			blueChannel.getPixelValue(index, uint8(b))
 		}
 	}
 
-	// SMQT here
 	fmt.Println("Running SMQT..")
-	redChannel.calculateSMQT(redChannel.rawIndex, 8)
-	greenChannel.calculateSMQT(greenChannel.rawIndex, 8)
-	blueChannel.calculateSMQT(blueChannel.rawIndex, 8)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		redChannel.runSMQT(redChannel.rawIndex, 8)
+	}()
+
+	go func() {
+		defer wg.Done()
+		blueChannel.runSMQT(blueChannel.rawIndex, 8)
+	}()
+
+	go func() {
+		defer wg.Done()
+		greenChannel.runSMQT(greenChannel.rawIndex, 8)
+
+	}()
+	wg.Wait()
+
 	fmt.Println("Creating output image..")
-	// Image Output
+
 	imgOut := image.NewRGBA(img.Bounds())
-	draw.Draw(imgOut, img.Bounds(), img, image.Point{}, draw.Over)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			index := (x * h) + y
@@ -168,4 +189,5 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+	fmt.Println("SMQT Successful!")
 }

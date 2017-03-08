@@ -1,5 +1,7 @@
 # go-SMQT
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/hadrianpaulo/go-smqt)](https://goreportcard.com/report/github.com/hadrianpaulo/go-smqt)
+
 An implementation of the Successive Mean Quantization Transform for HDR Images
 
 ## Instructions
